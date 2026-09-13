@@ -1,0 +1,10 @@
+# M1: app only. Redis / Prometheus are M4/M5 (planned, not included).
+services:
+  gateway:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./configs:/app/configs:ro

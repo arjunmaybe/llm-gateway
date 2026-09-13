@@ -1,0 +1,37 @@
+# M1 gateway configuration. Secrets must NOT go here — use environment variables.
+server:
+  host: "127.0.0.1"
+  port: 8000
+
+logging:
+  level: "INFO"  # DEBUG | INFO | WARNING | ERROR
+
+routing:
+  default_provider: "mock-a"
+  # Canonical model name -> provider name. Strict-subset demo mapping.
+  model_aliases:
+    "mock": "mock-a"
+    "mock-a": "mock-a"
+    "mock-b": "mock-b"
+
+providers:
+  - name: "mock-a"
+    type: "mock"
+    enabled: true
+    priority: 10
+    timeout_s: 5.0
+    mock:
+      latency_ms: 0.0
+      fail_rate: 0.0
+      failure_mode: "unavailable"  # timeout | unavailable | rate_limited
+      response_tokens: 24
+  - name: "mock-b"
+    type: "mock"
+    enabled: true
+    priority: 20
+    timeout_s: 5.0
+    mock:
+      latency_ms: 0.0
+      fail_rate: 0.0
+      failure_mode: "unavailable"
+      response_tokens: 12

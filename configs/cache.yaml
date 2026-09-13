@@ -1,0 +1,3 @@
+# Reserved for M4 (semantic/exact cache). Not loaded in M1.
+# Planned keys: backend, redis_url, exact_ttl_s, semantic_threshold, embedding_model.
+backend: "noop"
