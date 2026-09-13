@@ -79,12 +79,24 @@ async def test_unknown_model_falls_back_to_default(app: FastAPI) -> None:
 
 async def test_provider_failure_normalized(failing_app: FastAPI) -> None:
     failing_body = chat_body(model="mock-a")
-    # mock-b is healthy; force route to mock-a via alias and fail_rate=1.0 there.
+    # M2: mock-a fails (fail_rate=1.0) so the request falls back to healthy mock-b.
     async with make_client(failing_app) as client:
         resp = await client.post("/v1/chat/completions", json=failing_body)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["provider"] == "mock-b"
+    assert resp.headers["x-provider"] == "mock-b"
+    assert body["request_id"] == resp.headers["x-request-id"]
+    assert "traceback" not in resp.text.lower()
+
+
+async def test_all_providers_fail_normalized(all_failing_app: FastAPI) -> None:
+    async with make_client(all_failing_app) as client:
+        resp = await client.post("/v1/chat/completions", json=chat_body(model="mock-a"))
     assert resp.status_code == 502
     err = resp.json()["error"]
-    assert err["provider"] == "mock-a"
+    assert err["provider"] == "mock-b"  # last attempted provider is reported
     assert err["retryable"] is True
     assert err["code"] == "PROVIDER_UNAVAILABLE"
+    assert err["request_id"] == resp.headers["x-request-id"]
     assert "traceback" not in resp.text.lower()

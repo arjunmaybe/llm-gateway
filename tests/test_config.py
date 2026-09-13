@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from src.config import AppSettings, load_settings
 
 
@@ -33,8 +35,6 @@ def test_env_overrides_yaml(tmp_path: Path, monkeypatch: object) -> None:
 
 
 def test_duplicate_provider_names_rejected() -> None:
-    import pytest
-
     from src.config import ProviderEntry
 
     with pytest.raises(ValueError):
@@ -44,3 +44,27 @@ def test_duplicate_provider_names_rejected() -> None:
                 ProviderEntry(name="dup", type="mock"),
             ]
         )
+
+
+def test_resilience_defaults_from_bundled_yaml() -> None:
+    settings = load_settings(Path("configs/gateway.yaml"))
+    assert settings.resilience.retry.max_attempts == 2
+    assert settings.resilience.retry.backoff_base_ms == 50.0
+    assert settings.resilience.retry.backoff_max_ms == 1000.0
+    assert settings.resilience.retry.max_elapsed_ms == 8000.0
+    assert settings.resilience.circuit_breaker.failure_threshold == 5
+    assert settings.resilience.circuit_breaker.recovery_timeout_s == 30.0
+    assert settings.resilience.circuit_breaker.half_open_max_inflight == 1
+
+
+def test_resilience_env_overrides_yaml(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GATEWAY_RETRY_MAX_ATTEMPTS", "4")
+    monkeypatch.setenv("GATEWAY_RETRY_BACKOFF_BASE_MS", "25")
+    monkeypatch.setenv("GATEWAY_CIRCUIT_FAILURE_THRESHOLD", "2")
+    monkeypatch.setenv("GATEWAY_CIRCUIT_RECOVERY_TIMEOUT_S", "5")
+    settings = load_settings(Path("configs/gateway.yaml"))
+    assert settings.resilience.retry.max_attempts == 4
+    assert settings.resilience.retry.backoff_base_ms == 25.0
+    assert settings.resilience.retry.backoff_max_ms == 1000.0  # untouched YAML value
+    assert settings.resilience.circuit_breaker.failure_threshold == 2
+    assert settings.resilience.circuit_breaker.recovery_timeout_s == 5.0

@@ -1,6 +1,8 @@
-# LLM Gateway (M1: minimal offline gateway)
+# LLM Gateway (M2: resilient offline gateway)
 
-M1 scope only: FastAPI ingress, static-priority routing over mock providers, normalized errors, `x-request-id` propagation, offline-friendly (`configs/gateway.yaml` + env overrides). No external LLM calls.
+M1 foundation plus M2 resilience: FastAPI ingress, static-priority routing over mock providers, normalized errors, `x-request-id` propagation, offline-friendly (`configs/gateway.yaml` + env overrides), bounded retries with backoff/jitter, per-provider circuit breaker, passive health tracking, and fallback across providers. No external LLM calls.
+
+See `docs/routing.md` for the retry / breaker / fallback design.
 
 ## Install (Python 3.11)
 
@@ -30,6 +32,10 @@ py -V:3.11 -m ruff check .
 py -V:3.11 -m mypy --strict src
 ```
 
-## Not in M1
+## Resilience (M2)
 
-M2: scoring/adaptive routing, active health probing, real circuit breaker. M3: SSE streaming. M4: caching (exact/semantic). M5: real OpenAI/Anthropic adapters, pricing. Stubs raise `NotImplementedError` or return 422.
+Primary failure falls back to the next healthy provider (`x-provider` names the final provider). Tuning lives in the `resilience:` block of `configs/gateway.yaml` (`GATEWAY_RETRY_*` / `GATEWAY_CIRCUIT_*` env vars win). Details: `docs/routing.md`.
+
+## Not yet implemented
+
+Scoring/adaptive routing, active health probing. M3: SSE streaming. M4: caching (exact/semantic). M5: real OpenAI/Anthropic adapters, pricing. Stubs raise `NotImplementedError` or return 422.

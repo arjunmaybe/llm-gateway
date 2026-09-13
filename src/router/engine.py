@@ -1,4 +1,4 @@
-"""Static priority router (M1). Scoring / adaptive policies arrive in M2."""
+"""Static priority router. M2 adds the fallback candidate chain; scoring stays out."""
 
 from __future__ import annotations
 
@@ -35,9 +35,18 @@ class RouterEngine:
         self._health = health
         self._breaker = breaker
 
+    def plan(self, *, model: str) -> list[str]:
+        """Ordered candidate chain for a model: alias-first, then priority.
+
+        M2: returns every candidate without health/breaker filtering. The
+        executor applies health and breaker gates per attempt, so a breaker
+        that recovers mid-request is still honored. Contains no
+        provider-specific logic — just names in preference order.
+        """
+        return self._ordered_candidates(model)
+
     def select_provider(self, *, model: str, request_id: str) -> RouteDecision:
-        _ = request_id
-        candidates = self._ordered_candidates(model)
+        candidates = self.plan(model=model)
         tried: list[str] = []
         for name in candidates:
             tried.append(name)

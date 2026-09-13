@@ -14,6 +14,18 @@ routing:
     "mock-a": "mock-a"
     "mock-b": "mock-b"
 
+# M2 resilience tuning. Env vars (GATEWAY_RETRY_*, GATEWAY_CIRCUIT_*) win over YAML.
+resilience:
+  retry:
+    max_attempts: 2  # total attempts per provider, first attempt counts
+    backoff_base_ms: 50.0
+    backoff_max_ms: 1000.0
+    max_elapsed_ms: 8000.0  # cap on total backoff sleeping per request
+  circuit_breaker:
+    failure_threshold: 5  # consecutive failures before OPEN
+    recovery_timeout_s: 30.0  # OPEN -> HALF_OPEN probe delay
+    half_open_max_inflight: 1  # concurrent recovery probes per provider
+
 providers:
   - name: "mock-a"
     type: "mock"
@@ -23,7 +35,7 @@ providers:
     mock:
       latency_ms: 0.0
       fail_rate: 0.0
-      failure_mode: "unavailable"  # timeout | unavailable | rate_limited
+      failure_mode: "unavailable"  # timeout | unavailable | rate_limited | connection | permanent
       response_tokens: 24
   - name: "mock-b"
     type: "mock"

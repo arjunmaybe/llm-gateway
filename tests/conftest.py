@@ -17,6 +17,8 @@ def make_settings(
     latency_ms_a: float = 0.0,
     response_tokens_a: int = 16,
     failure_mode_a: str = "unavailable",
+    fail_rate_b: float = 0.0,
+    failure_mode_b: str = "unavailable",
 ) -> AppSettings:
     return AppSettings(
         routing=RoutingSettings(
@@ -43,7 +45,10 @@ def make_settings(
                 enabled=True,
                 priority=20,
                 timeout_s=5.0,
-                mock=MockProviderSettings(),
+                mock=MockProviderSettings(
+                    fail_rate=fail_rate_b,  # type: ignore[arg-type]
+                    failure_mode=failure_mode_b,  # type: ignore[arg-type]
+                ),
             ),
         ],
     )
@@ -62,6 +67,11 @@ def app(settings: AppSettings) -> FastAPI:
 @pytest.fixture()
 def failing_app() -> FastAPI:
     return create_app(make_settings(fail_rate_a=1.0))
+
+
+@pytest.fixture()
+def all_failing_app() -> FastAPI:
+    return create_app(make_settings(fail_rate_a=1.0, fail_rate_b=1.0))
 
 
 def make_client(app: FastAPI) -> httpx.AsyncClient:

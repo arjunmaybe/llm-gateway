@@ -1,4 +1,4 @@
-"""M1 passive health registry. Active probing arrives in M2."""
+"""Passive health registry. M2 reports request outcomes; active probing is future work."""
 
 from __future__ import annotations
 
@@ -8,8 +8,9 @@ from src.providers.base import HealthStatus
 class HealthRegistry:
     """Static health view derived from config + runtime marks.
 
-    M1: initialized healthy for every enabled provider; ``mark_*`` hooks exist
-    so M2 background probing / failure tracking can plug in without API change.
+    Initialized healthy for every enabled provider. M2 passive reporting
+    (success → healthy, permanent failure → unhealthy) plugs into ``mark_*``
+    without API change; future active probing will use the same hooks.
     """
 
     def __init__(self, providers: list[str]) -> None:

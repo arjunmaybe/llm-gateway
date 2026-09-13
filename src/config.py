@@ -49,6 +49,37 @@ class ProviderEntry(BaseModel):
     mock: MockProviderSettings = Field(default_factory=MockProviderSettings)
 
 
+class RetrySettings(BaseModel):
+    """M2 retry policy. First attempt counts toward ``max_attempts``."""
+
+    model_config = ConfigDict(frozen=True)
+
+    max_attempts: int = Field(default=2, ge=1)
+    backoff_base_ms: float = Field(default=50.0, gt=0.0)
+    backoff_max_ms: float = Field(default=1000.0, gt=0.0)
+    max_elapsed_ms: float = Field(default=8000.0, ge=0.0)
+
+
+class CircuitBreakerSettings(BaseModel):
+    """M2 per-provider breaker thresholds."""
+
+    model_config = ConfigDict(frozen=True)
+
+    failure_threshold: int = Field(default=5, ge=1)
+    recovery_timeout_s: float = Field(default=30.0, gt=0.0)
+    half_open_max_inflight: int = Field(default=1, ge=1)
+
+
+class ResilienceSettings(BaseModel):
+    """M2 fault-tolerance tuning. Env vars (``GATEWAY_RETRY_*`` /
+    ``GATEWAY_CIRCUIT_*``) take precedence over these YAML values."""
+
+    model_config = ConfigDict(frozen=True)
+
+    retry: RetrySettings = Field(default_factory=RetrySettings)
+    circuit_breaker: CircuitBreakerSettings = Field(default_factory=CircuitBreakerSettings)
+
+
 class AppSettings(BaseModel):
     """Validated, fully-resolved gateway configuration."""
 
@@ -58,6 +89,7 @@ class AppSettings(BaseModel):
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     routing: RoutingSettings = Field(default_factory=RoutingSettings)
     providers: list[ProviderEntry] = Field(default_factory=list)
+    resilience: ResilienceSettings = Field(default_factory=ResilienceSettings)
 
     @field_validator("providers")
     @classmethod
@@ -96,6 +128,13 @@ def _env_float(name: str) -> float | None:
     if raw is None or raw == "":
         return None
     return float(raw)
+
+
+def _env_int(name: str) -> int | None:
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return None
+    return int(raw)
 
 
 def load_settings(path: Path | None = None) -> AppSettings:
@@ -150,5 +189,52 @@ def load_settings(path: Path | None = None) -> AppSettings:
         providers = rebuilt
 
     return AppSettings(
-        server=server, logging=logging_cfg, routing=routing, providers=providers
+        server=server,
+        logging=logging_cfg,
+        routing=routing,
+        providers=providers,
+        resilience=_resolve_resilience(settings.resilience),
     )
+
+
+def _resolve_resilience(base: ResilienceSettings) -> ResilienceSettings:
+    """Overlay M2 resilience env vars on top of YAML values (env wins)."""
+    retry_attempts = _env_int("GATEWAY_RETRY_MAX_ATTEMPTS")
+    retry_base = _env_float("GATEWAY_RETRY_BACKOFF_BASE_MS")
+    retry_max = _env_float("GATEWAY_RETRY_BACKOFF_MAX_MS")
+    retry_elapsed = _env_float("GATEWAY_RETRY_MAX_ELAPSED_MS")
+    cb_threshold = _env_int("GATEWAY_CIRCUIT_FAILURE_THRESHOLD")
+    cb_recovery = _env_float("GATEWAY_CIRCUIT_RECOVERY_TIMEOUT_S")
+    cb_inflight = _env_int("GATEWAY_CIRCUIT_HALF_OPEN_INFLIGHT")
+
+    retry = base.retry
+    if (
+        retry_attempts is not None
+        or retry_base is not None
+        or retry_max is not None
+        or retry_elapsed is not None
+    ):
+        retry = RetrySettings(
+            max_attempts=retry_attempts if retry_attempts is not None else retry.max_attempts,
+            backoff_base_ms=retry_base if retry_base is not None else retry.backoff_base_ms,
+            backoff_max_ms=retry_max if retry_max is not None else retry.backoff_max_ms,
+            max_elapsed_ms=retry_elapsed if retry_elapsed is not None else retry.max_elapsed_ms,
+        )
+
+    breaker = base.circuit_breaker
+    if cb_threshold is not None or cb_recovery is not None or cb_inflight is not None:
+        breaker = CircuitBreakerSettings(
+            failure_threshold=(
+                cb_threshold if cb_threshold is not None else breaker.failure_threshold
+            ),
+            recovery_timeout_s=(
+                cb_recovery if cb_recovery is not None else breaker.recovery_timeout_s
+            ),
+            half_open_max_inflight=(
+                cb_inflight if cb_inflight is not None else breaker.half_open_max_inflight
+            ),
+        )
+
+    if retry is base.retry and breaker is base.circuit_breaker:
+        return base
+    return ResilienceSettings(retry=retry, circuit_breaker=breaker)

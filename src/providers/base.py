@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict
 
 from src.models import NormalizedChatRequest, Usage
 
-ProviderFailureMode = Literal["timeout", "unavailable", "rate_limited"]
+ProviderFailureMode = Literal["timeout", "unavailable", "rate_limited", "connection", "permanent"]
 
 
 class ProviderResponse(BaseModel):

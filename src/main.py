@@ -35,7 +35,9 @@ from src.models import (
 from src.providers.base import ProviderAdapter
 from src.providers.mock import MockProvider
 from src.proxy.client import ProxyClient
-from src.router.circuit_breaker import NoOpCircuitBreaker
+from src.resilience.executor import ResilientExecutor
+from src.resilience.retry import RetryPolicy
+from src.router.circuit_breaker import ResilientCircuitBreaker
 from src.router.engine import RouterEngine
 from src.router.health import HealthRegistry
 from src.telemetry.latency import Timer
@@ -109,7 +111,11 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     enabled_ordered = resolved.enabled_providers_in_priority_order()
     priority = [p.name for p in enabled_ordered if p.name in providers]
     health_registry = HealthRegistry([p.name for p in enabled_ordered])
-    breaker = NoOpCircuitBreaker()
+    breaker = ResilientCircuitBreaker(
+        failure_threshold=resolved.resilience.circuit_breaker.failure_threshold,
+        recovery_timeout_s=resolved.resilience.circuit_breaker.recovery_timeout_s,
+        half_open_max_inflight=resolved.resilience.circuit_breaker.half_open_max_inflight,
+    )
     router = RouterEngine(
         priority=priority,
         default_provider=resolved.routing.default_provider,
@@ -125,6 +131,20 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     cache = NoOpCacheManager()
     metrics = NoOpMetricsRecorder()
     tracer = NoOpTracer()
+    executor = ResilientExecutor(
+        router=router,
+        proxy=proxy,
+        breaker=breaker,
+        health=health_registry,
+        retry=RetryPolicy(
+            max_attempts=resolved.resilience.retry.max_attempts,
+            backoff_base_ms=resolved.resilience.retry.backoff_base_ms,
+            backoff_max_ms=resolved.resilience.retry.backoff_max_ms,
+            max_elapsed_ms=resolved.resilience.retry.max_elapsed_ms,
+        ),
+        metrics=metrics,
+        tracer=tracer,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -149,6 +169,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.state.cache = cache
     app.state.metrics = metrics
     app.state.tracer = tracer
+    app.state.executor = executor
 
     def _envelope(
         *, code: str, message: str, provider: str | None, retryable: bool, request_id: str
@@ -260,15 +281,16 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         with tracer.span("cache.lookup", provider=route.provider_name):
             _ = await cache.get(request_id)
         try:
-            with tracer.span("provider.forward", provider=route.provider_name):
-                result = await proxy.forward(route, normalized)
+            executed = await executor.execute(normalized)
         except GatewayError as exc:
             if not exc.request_id:
                 exc.request_id = request_id
-            breaker.record_failure(route.provider_name)
-            metrics.increment("gateway_errors_total", provider=route.provider_name, code=exc.code)
+            metrics.increment(
+                "gateway_errors_total", provider=exc.provider or "", code=exc.code
+            )
             raise
-        breaker.record_success(route.provider_name)
+        result = executed.response
+        request.state.execution_outcome = executed.outcome
 
         content = result.content
         finish_reason: Literal["stop", "length"] = "stop"
