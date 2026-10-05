@@ -1,3 +1,6 @@
-# Reserved for M4 (semantic/exact cache). Not loaded in M1.
-# Planned keys: backend, redis_url, exact_ttl_s, semantic_threshold, embedding_model.
+# M4 semantic/exact cache. Loaded into AppSettings.cache.
+# backend: "noop" (always miss) | "memory" | "semantic" (in-memory cosine search).
+# Future keys (ignored if present): redis_url, exact_ttl_s.
 backend: "noop"
+semantic_threshold: 0.85
+embedding_model: "all-MiniLM-L6-v2"

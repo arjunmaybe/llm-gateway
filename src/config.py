@@ -80,6 +80,16 @@ class ResilienceSettings(BaseModel):
     circuit_breaker: CircuitBreakerSettings = Field(default_factory=CircuitBreakerSettings)
 
 
+class CacheSettings(BaseModel):
+    """M4 semantic-cache tuning. ``configs/cache.yaml`` + env win over defaults."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    backend: Literal["noop", "memory", "semantic"] = "noop"
+    semantic_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+    embedding_model: str = Field(default="all-MiniLM-L6-v2", min_length=1)
+
+
 class AppSettings(BaseModel):
     """Validated, fully-resolved gateway configuration."""
 
@@ -90,6 +100,7 @@ class AppSettings(BaseModel):
     routing: RoutingSettings = Field(default_factory=RoutingSettings)
     providers: list[ProviderEntry] = Field(default_factory=list)
     resilience: ResilienceSettings = Field(default_factory=ResilienceSettings)
+    cache: CacheSettings = Field(default_factory=CacheSettings)
 
     @field_validator("providers")
     @classmethod
@@ -108,6 +119,12 @@ class AppSettings(BaseModel):
 def default_config_path() -> Path:
     """Resolve YAML path. ``GATEWAY_CONFIG_PATH`` env wins over the default."""
     raw = os.getenv("GATEWAY_CONFIG_PATH", "configs/gateway.yaml")
+    return Path(raw)
+
+
+def default_cache_config_path() -> Path:
+    """Resolve cache YAML path. ``GATEWAY_CACHE_CONFIG_PATH`` wins over default."""
+    raw = os.getenv("GATEWAY_CACHE_CONFIG_PATH", "configs/cache.yaml")
     return Path(raw)
 
 
@@ -183,6 +200,10 @@ def load_settings(path: Path | None = None) -> AppSettings:
                         fail_rate=mock_fail if mock_fail is not None else mock.fail_rate,
                         failure_mode=mock.failure_mode,
                         response_tokens=mock.response_tokens,
+                        failure_script=mock.failure_script,
+                        stream_chunk_words=mock.stream_chunk_words,
+                        stream_failure_after=mock.stream_failure_after,
+                        stream_failure_mode=mock.stream_failure_mode,
                     ),
                 )
             )
@@ -194,6 +215,7 @@ def load_settings(path: Path | None = None) -> AppSettings:
         routing=routing,
         providers=providers,
         resilience=_resolve_resilience(settings.resilience),
+        cache=_resolve_cache(settings.cache, cfg_path=cfg_path, gateway_data=data),
     )
 
 
@@ -238,3 +260,82 @@ def _resolve_resilience(base: ResilienceSettings) -> ResilienceSettings:
     if retry is base.retry and breaker is base.circuit_breaker:
         return base
     return ResilienceSettings(retry=retry, circuit_breaker=breaker)
+
+
+def _resolve_cache(
+    base: CacheSettings,
+    *,
+    cfg_path: Path,
+    gateway_data: dict[str, Any],
+) -> CacheSettings:
+    """Overlay cache YAML + env vars on top of gateway YAML values (env wins).
+
+    Precedence: inline ``cache:`` section in gateway YAML > sibling
+    ``cache.yaml`` next to the gateway file > ``configs/cache.yaml`` default >
+    built-in defaults. Env vars win over all files.
+    """
+    file_data: dict[str, Any] = {}
+    inline = gateway_data.get("cache")
+    if isinstance(inline, dict):
+        file_data = dict(inline)
+    else:
+        candidates: list[Path] = []
+        try:
+            sibling = cfg_path.parent / "cache.yaml"
+            candidates.append(sibling)
+        except Exception:
+            pass
+        default = default_cache_config_path()
+        if default not in candidates:
+            candidates.append(default)
+        for cand in candidates:
+            try:
+                if cand.exists():
+                    loaded = _read_yaml(cand)
+                    if loaded:
+                        file_data = loaded
+                        break
+            except Exception:
+                continue
+
+    merged = base
+    if file_data:
+        try:
+            merged = CacheSettings.model_validate(file_data)
+        except Exception:
+            merged = base
+
+    backend_raw = os.getenv("GATEWAY_CACHE_BACKEND")
+    threshold_raw = _env_float("GATEWAY_CACHE_THRESHOLD")
+    if threshold_raw is None:
+        threshold_raw = _env_float("GATEWAY_CACHE_SEMANTIC_THRESHOLD")
+    model_raw = os.getenv("GATEWAY_CACHE_MODEL")
+    if model_raw is None or model_raw == "":
+        model_raw = os.getenv("GATEWAY_CACHE_EMBEDDING_MODEL")
+
+    backend = merged.backend
+    if backend_raw is not None and backend_raw != "":
+        normalized = backend_raw.strip().lower()
+        if normalized in ("noop", "memory", "semantic"):
+            backend = normalized  # type: ignore[assignment]
+
+    threshold = merged.semantic_threshold
+    if threshold_raw is not None:
+        threshold = threshold_raw
+
+    model = merged.embedding_model
+    if model_raw is not None and model_raw != "":
+        model = model_raw
+
+    if backend == merged.backend and threshold == merged.semantic_threshold and model == (
+        merged.embedding_model
+    ):
+        return merged
+    try:
+        return CacheSettings(
+            backend=backend,
+            semantic_threshold=threshold,
+            embedding_model=model,
+        )
+    except Exception:
+        return merged
