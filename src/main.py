@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -43,6 +44,7 @@ from src.models import (
 )
 from src.providers.base import ProviderAdapter
 from src.providers.mock import MockProvider
+from src.providers.openrouter import OpenRouterProvider
 from src.proxy.client import ProxyClient
 from src.proxy.sse_parser import format_chunk, format_done, format_error
 from src.resilience.executor import ResilientExecutor
@@ -139,6 +141,12 @@ def build_providers(settings: AppSettings) -> dict[str, ProviderAdapter]:
     for entry in settings.providers:
         if entry.type == "mock":
             providers[entry.name] = MockProvider(entry.name, entry.mock)
+        elif entry.type == "openrouter":
+            providers[entry.name] = OpenRouterProvider(
+                entry.name,
+                entry.openrouter,
+                api_key=os.getenv("OPENROUTER_API_KEY") or None,
+            )
     return providers
 
 

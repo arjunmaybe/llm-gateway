@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import random
 import time
+from collections.abc import AsyncIterator
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -29,6 +30,12 @@ class MockProviderSettings(BaseModel):
     succeeds, otherwise the entry names the failure mode to raise. Consumed
     in invocation order; once exhausted, the legacy ``fail_rate`` path
     applies. Empty script preserves exact M1 behavior.
+
+    M3 streaming knobs: ``stream_chunk_words`` controls deterministic word
+    chunking; ``stream_failure_after`` (chunk index, 0-based) injects a
+    mid-stream ``ProviderError`` after that many chunks have been yielded
+    (``0`` fails before the first chunk); ``stream_failure_mode`` overrides
+    ``failure_mode`` for the mid-stream fault.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -38,6 +45,9 @@ class MockProviderSettings(BaseModel):
     failure_mode: FailureMode = "unavailable"
     response_tokens: int = Field(default=24, ge=1, le=4096)
     failure_script: tuple[FailureMode | None, ...] = ()
+    stream_chunk_words: int = Field(default=2, ge=1, le=64)
+    stream_failure_after: int | None = Field(default=None, ge=0)
+    stream_failure_mode: FailureMode | None = None
 
 
 def _deterministic_rng(*parts: str) -> random.Random:
@@ -100,6 +110,46 @@ class MockProvider(ProviderAdapter):
             usage=usage,
             latency_ms=latency_ms,
         )
+
+    async def chat_stream(self, request: NormalizedChatRequest) -> AsyncIterator[str]:
+        """Yield deterministic word chunks. Failures mirror ``chat`` pre-first-byte.
+
+        Pre-first-byte: ``failure_script`` / ``fail_rate`` raise before any
+        yield (enables pre-first-byte fallback). Mid-stream:
+        ``stream_failure_after=N`` raises after N chunks yielded.
+        """
+        async with self._lock:
+            call_index = self._calls
+            self._calls += 1
+        if self._settings.latency_ms > 0:
+            await asyncio.sleep(self._settings.latency_ms / 1000.0)
+
+        script = self._settings.failure_script
+        if call_index < len(script):
+            scripted = script[call_index]
+            if scripted is not None:
+                raise self._failure(mode=scripted, request_id=request.request_id)
+        else:
+            rng = _deterministic_rng(self._name, request.request_id)
+            if rng.random() < self._settings.fail_rate:
+                raise self._failure(mode=self._settings.failure_mode, request_id=request.request_id)
+
+        content = self._generate(request)
+        words = content.split()
+        size = self._settings.stream_chunk_words
+        chunks = [" ".join(words[i : i + size]) for i in range(0, len(words), size)]
+        failure_after = self._settings.stream_failure_after
+        failure_mode = self._settings.stream_failure_mode or self._settings.failure_mode
+        yielded = 0
+        for chunk in chunks:
+            if failure_after is not None and yielded == failure_after:
+                raise self._failure(mode=failure_mode, request_id=request.request_id)
+            yield chunk
+            yielded += 1
+            # Cooperative yield point so cancellation/disconnect is observed promptly.
+            await asyncio.sleep(0)
+        if failure_after is not None and yielded == failure_after:
+            raise self._failure(mode=failure_mode, request_id=request.request_id)
 
     async def health_check(self) -> HealthStatus:
         healthy = self._settings.fail_rate < 1.0

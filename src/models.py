@@ -96,6 +96,37 @@ class ChatCompletionResponse(BaseModel):
     itl_ms: float | None = None
 
 
+class ChatCompletionChunkDelta(BaseModel):
+    """Streaming delta. First chunk carries role; later chunks content-only."""
+
+    model_config = ConfigDict(frozen=True)
+
+    role: Literal["assistant"] | None = None
+    content: str | None = None
+
+
+class ChatCompletionChunkChoice(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    index: int = 0
+    delta: ChatCompletionChunkDelta
+    finish_reason: Literal["stop", "length"] | None = None
+
+
+class ChatCompletionChunk(BaseModel):
+    """OpenAI-style streaming chunk plus gateway extensions."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    object: Literal["chat.completion.chunk"] = "chat.completion.chunk"
+    created: int
+    model: str
+    choices: list[ChatCompletionChunkChoice]
+    provider: str
+    request_id: str
+
+
 class GatewayErrorPayload(BaseModel):
     """Normalized error body. Never contains raw provider payloads."""
 

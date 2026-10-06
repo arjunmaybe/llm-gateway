@@ -14,6 +14,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.providers.mock import MockProviderSettings
+from src.providers.openrouter import OpenRouterSettings
 
 
 class ServerSettings(BaseModel):
@@ -42,11 +43,12 @@ class ProviderEntry(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     name: str = Field(min_length=1)
-    type: Literal["mock"] = "mock"
+    type: Literal["mock", "openrouter"] = "mock"
     enabled: bool = True
     priority: int = 10
     timeout_s: float = Field(default=5.0, gt=0.0)
     mock: MockProviderSettings = Field(default_factory=MockProviderSettings)
+    openrouter: OpenRouterSettings = Field(default_factory=OpenRouterSettings)
 
 
 class RetrySettings(BaseModel):
@@ -184,6 +186,32 @@ def load_settings(path: Path | None = None) -> AppSettings:
         )
 
     providers = list(settings.providers)
+    openrouter_model = os.getenv("GATEWAY_OPENROUTER_MODEL")
+    if openrouter_model is not None and openrouter_model != "":
+        overridden: list[ProviderEntry] = []
+        for entry in providers:
+            if entry.type == "openrouter":
+                overridden.append(
+                    ProviderEntry(
+                        name=entry.name,
+                        type=entry.type,
+                        enabled=entry.enabled,
+                        priority=entry.priority,
+                        timeout_s=entry.timeout_s,
+                        mock=entry.mock,
+                        openrouter=OpenRouterSettings(
+                            api_key=entry.openrouter.api_key,
+                            model=openrouter_model,
+                            base_url=entry.openrouter.base_url,
+                            timeout_s=entry.openrouter.timeout_s,
+                            site_url=entry.openrouter.site_url,
+                            app_name=entry.openrouter.app_name,
+                        ),
+                    )
+                )
+            else:
+                overridden.append(entry)
+        providers = overridden
     if mock_latency is not None or mock_fail is not None:
         rebuilt: list[ProviderEntry] = []
         for entry in providers:
@@ -195,6 +223,7 @@ def load_settings(path: Path | None = None) -> AppSettings:
                     enabled=entry.enabled,
                     priority=entry.priority,
                     timeout_s=entry.timeout_s,
+                    openrouter=entry.openrouter,
                     mock=MockProviderSettings(
                         latency_ms=mock_latency if mock_latency is not None else mock.latency_ms,
                         fail_rate=mock_fail if mock_fail is not None else mock.fail_rate,

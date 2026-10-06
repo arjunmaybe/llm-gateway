@@ -7,6 +7,7 @@ without changing routing, proxy, or API code (M2+).
 from __future__ import annotations
 
 import abc
+from collections.abc import AsyncIterator
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -70,7 +71,15 @@ class ProviderAdapter(abc.ABC):
 
     @abc.abstractmethod
     async def chat(self, request: NormalizedChatRequest) -> ProviderResponse:
-        """Non-streaming completion. Streaming arrives in M3."""
+        """Non-streaming completion."""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def chat_stream(self, request: NormalizedChatRequest) -> AsyncIterator[str]:
+        """Streaming completion yielding normalized content chunks.
+
+        Transport-agnostic: providers yield plain text chunks, never SSE.
+        """
         raise NotImplementedError
 
     @abc.abstractmethod

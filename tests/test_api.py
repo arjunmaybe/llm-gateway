@@ -54,13 +54,22 @@ async def test_request_id_propagated(app: FastAPI) -> None:
     assert resp.json()["request_id"] == "fixed-id-123"
 
 
-async def test_stream_rejected(app: FastAPI) -> None:
+async def test_stream_supported_returns_sse(app: FastAPI) -> None:
+    """M3: stream=true returns SSE (replaces M1/M2 422 rejection)."""
+    from src.proxy.sse_parser import parse_sse_stream
+
     payload = chat_body()
     payload["stream"] = True
     async with make_client(app) as client:
         resp = await client.post("/v1/chat/completions", json=payload)
-    assert resp.status_code == 422
-    assert resp.json()["error"]["code"] == "STREAMING_NOT_SUPPORTED"
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+    events = parse_sse_stream(resp.text)
+    assert events
+    assert events[-1] == "DONE"
+    first = events[0]
+    assert isinstance(first, dict)
+    assert first["object"] == "chat.completion.chunk"
 
 
 async def test_invalid_body_rejected(app: FastAPI) -> None:

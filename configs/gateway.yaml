@@ -47,3 +47,22 @@ providers:
       fail_rate: 0.0
       failure_mode: "unavailable"
       response_tokens: 12
+
+# OpenRouter (real providers). Enabled — requires OPENROUTER_API_KEY in env.
+# Primary / fallback pair: the gateway's real router (RouterEngine +
+# ResilientExecutor) tries them in priority order and falls back on failure.
+# See live_openrouter_test.py for a live primary -> fallback demonstration.
+  - name: "openrouter-primary"
+    type: "openrouter"
+    enabled: true
+    priority: 30
+    timeout_s: 30.0
+    openrouter:
+      model: "google/gemma-4-31b-it:free"
+  - name: "openrouter-fallback"
+    type: "openrouter"
+    enabled: true
+    priority: 31
+    timeout_s: 30.0
+    openrouter:
+      model: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
