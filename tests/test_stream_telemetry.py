@@ -25,6 +25,10 @@ from src.proxy.sse_parser import parse_sse_stream
 from tests.conftest import chat_body, make_client
 
 FIRST_BYTE_DELAY_MS = 60.0
+# Wall-clock slack for the TTFT-vs-delay assertion: OS timers (notably the
+# ~15.6 ms Windows tick) may wake asyncio.sleep a few ms early, so TTFT can
+# land just under the configured delay without anything being wrong.
+TIMER_SLACK_MS = 15.0
 
 
 def make_telemetry_settings(
@@ -98,7 +102,7 @@ async def test_stream_emits_positive_ttft_and_itl() -> None:
     itl_ms = entry.get("itl_ms")
     assert isinstance(ttft_ms, float) and ttft_ms > 0.0
     assert isinstance(itl_ms, float) and itl_ms > 0.0
-    assert ttft_ms >= FIRST_BYTE_DELAY_MS
+    assert ttft_ms >= FIRST_BYTE_DELAY_MS - TIMER_SLACK_MS
     timing = entry.get("timing_ms")
     assert isinstance(timing, dict)
     assert timing.get("ttft") == ttft_ms or abs(timing["ttft"] - ttft_ms) < 0.0015

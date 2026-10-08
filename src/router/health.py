@@ -1,4 +1,4 @@
-"""Passive health registry. M2 reports request outcomes; active probing is future work."""
+"""Passive health registry. M2 reports request outcomes; HealthProber reconciles it."""
 
 from __future__ import annotations
 
@@ -9,8 +9,9 @@ class HealthRegistry:
     """Static health view derived from config + runtime marks.
 
     Initialized healthy for every enabled provider. M2 passive reporting
-    (success → healthy, permanent failure → unhealthy) plugs into ``mark_*``
-    without API change; future active probing will use the same hooks.
+    (success → healthy, permanent failure → unhealthy) plugs into ``mark_*``;
+    the active :class:`src.router.prober.HealthProber` uses the same hooks
+    to recover providers that start passing ``health_check()`` again.
     """
 
     def __init__(self, providers: list[str]) -> None:

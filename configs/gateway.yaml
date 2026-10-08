@@ -33,6 +33,15 @@ scoring:
   weight_cost: 1.0
   weight_quality: 1.0
 
+# Active health probing. Probes every enabled provider's health_check() on the
+# interval so a provider marked unhealthy by a permanent failure re-enters
+# rotation once it recovers (without probing, that mark sticks until a success
+# re-marks it — which can't happen while the provider is skipped).
+health:
+  probe_enabled: true
+  probe_interval_s: 30.0
+  probe_timeout_s: 5.0
+
 providers:
   - name: "mock-a"
     type: "mock"

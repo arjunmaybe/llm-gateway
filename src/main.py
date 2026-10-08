@@ -58,6 +58,7 @@ from src.resilience.retry import RetryPolicy
 from src.router.circuit_breaker import CircuitState, ResilientCircuitBreaker
 from src.router.engine import RouteDecision, RouterEngine
 from src.router.health import HealthRegistry
+from src.router.prober import HealthProber
 from src.router.scorer import ScoringWeights
 from src.telemetry.latency import LatencyTracker, StreamingTiming, Timer
 from src.telemetry.metrics import NoOpMetricsRecorder
@@ -212,6 +213,15 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     cache = build_cache(resolved)
     metrics = NoOpMetricsRecorder()
     tracer = NoOpTracer()
+    prober: HealthProber | None = None
+    if resolved.health.probe_enabled:
+        prober = HealthProber(
+            providers=providers,
+            enabled=[p.name for p in enabled_ordered],
+            health=health_registry,
+            interval_s=resolved.health.probe_interval_s,
+            timeout_s=resolved.health.probe_timeout_s,
+        )
     executor = ResilientExecutor(
         router=router,
         proxy=proxy,
@@ -237,9 +247,18 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             providers=sorted(providers.keys()),
             default_provider=resolved.routing.default_provider,
         )
+        if prober is not None:
+            prober.start()
+            log.info(
+                "gateway.health_prober_started",
+                interval_s=resolved.health.probe_interval_s,
+                timeout_s=resolved.health.probe_timeout_s,
+            )
         try:
             yield
         finally:
+            if prober is not None:
+                await prober.stop()
             await client.aclose()
 
     app = FastAPI(title="LLM Gateway", version=__version__, lifespan=lifespan)
@@ -253,6 +272,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.state.metrics = metrics
     app.state.tracer = tracer
     app.state.executor = executor
+    app.state.health_prober = prober
 
     def _envelope(
         *, code: str, message: str, provider: str | None, retryable: bool, request_id: str

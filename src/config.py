@@ -111,6 +111,21 @@ class CacheSettings(BaseModel):
     embedding_model: str = Field(default="all-MiniLM-L6-v2", min_length=1)
 
 
+class HealthSettings(BaseModel):
+    """Active provider health probing.
+
+    Disabled by default so unit tests and offline setups keep the passive
+    M2 behavior (a permanent-failure mark sticks until a success re-marks
+    it). Deployments opt in via ``configs/gateway.yaml`` under ``health:``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    probe_enabled: bool = False
+    probe_interval_s: float = Field(default=30.0, gt=0.0)
+    probe_timeout_s: float = Field(default=5.0, gt=0.0)
+
+
 class AppSettings(BaseModel):
     """Validated, fully-resolved gateway configuration."""
 
@@ -123,6 +138,7 @@ class AppSettings(BaseModel):
     resilience: ResilienceSettings = Field(default_factory=ResilienceSettings)
     scoring: ScoringSettings = Field(default_factory=ScoringSettings)
     cache: CacheSettings = Field(default_factory=CacheSettings)
+    health: HealthSettings = Field(default_factory=HealthSettings)
 
     @field_validator("providers")
     @classmethod
@@ -270,6 +286,7 @@ def load_settings(path: Path | None = None) -> AppSettings:
         resilience=_resolve_resilience(settings.resilience),
         scoring=settings.scoring,
         cache=_resolve_cache(settings.cache, cfg_path=cfg_path, gateway_data=data),
+        health=settings.health,
     )
 
 
