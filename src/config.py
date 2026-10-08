@@ -47,6 +47,10 @@ class ProviderEntry(BaseModel):
     enabled: bool = True
     priority: int = 10
     timeout_s: float = Field(default=5.0, gt=0.0)
+    # Multi-factor scoring inputs. Defaults keep existing configs working:
+    # free (cost 0) with neutral quality 0.5.
+    cost_per_1k_tokens: float = Field(default=0.0, ge=0.0)
+    quality_weight: float = Field(default=0.5, ge=0.0, le=1.0)
     mock: MockProviderSettings = Field(default_factory=MockProviderSettings)
     openrouter: OpenRouterSettings = Field(default_factory=OpenRouterSettings)
 
@@ -82,6 +86,21 @@ class ResilienceSettings(BaseModel):
     circuit_breaker: CircuitBreakerSettings = Field(default_factory=CircuitBreakerSettings)
 
 
+class ScoringSettings(BaseModel):
+    """Multi-factor provider-scoring weights (router/scorer).
+
+    Each weight scales one 0-1 component (latency, cost, quality) in the
+    composite score. Equal defaults mean equally weighted; tune per
+    deployment in ``configs/gateway.yaml`` under ``scoring:``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    weight_latency: float = Field(default=1.0, ge=0.0)
+    weight_cost: float = Field(default=1.0, ge=0.0)
+    weight_quality: float = Field(default=1.0, ge=0.0)
+
+
 class CacheSettings(BaseModel):
     """M4 semantic-cache tuning. ``configs/cache.yaml`` + env win over defaults."""
 
@@ -102,6 +121,7 @@ class AppSettings(BaseModel):
     routing: RoutingSettings = Field(default_factory=RoutingSettings)
     providers: list[ProviderEntry] = Field(default_factory=list)
     resilience: ResilienceSettings = Field(default_factory=ResilienceSettings)
+    scoring: ScoringSettings = Field(default_factory=ScoringSettings)
     cache: CacheSettings = Field(default_factory=CacheSettings)
 
     @field_validator("providers")
@@ -198,6 +218,8 @@ def load_settings(path: Path | None = None) -> AppSettings:
                         enabled=entry.enabled,
                         priority=entry.priority,
                         timeout_s=entry.timeout_s,
+                        cost_per_1k_tokens=entry.cost_per_1k_tokens,
+                        quality_weight=entry.quality_weight,
                         mock=entry.mock,
                         openrouter=OpenRouterSettings(
                             api_key=entry.openrouter.api_key,
@@ -223,6 +245,8 @@ def load_settings(path: Path | None = None) -> AppSettings:
                     enabled=entry.enabled,
                     priority=entry.priority,
                     timeout_s=entry.timeout_s,
+                    cost_per_1k_tokens=entry.cost_per_1k_tokens,
+                    quality_weight=entry.quality_weight,
                     openrouter=entry.openrouter,
                     mock=MockProviderSettings(
                         latency_ms=mock_latency if mock_latency is not None else mock.latency_ms,
@@ -244,6 +268,7 @@ def load_settings(path: Path | None = None) -> AppSettings:
         routing=routing,
         providers=providers,
         resilience=_resolve_resilience(settings.resilience),
+        scoring=settings.scoring,
         cache=_resolve_cache(settings.cache, cfg_path=cfg_path, gateway_data=data),
     )
 

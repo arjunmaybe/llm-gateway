@@ -26,6 +26,13 @@ resilience:
     recovery_timeout_s: 30.0  # OPEN -> HALF_OPEN probe delay
     half_open_max_inflight: 1  # concurrent recovery probes per provider
 
+# Multi-factor scoring weights. Equal defaults = equally weighted composite
+# of latency (lower better), cost (lower better), quality_weight (higher better).
+scoring:
+  weight_latency: 1.0
+  weight_cost: 1.0
+  weight_quality: 1.0
+
 providers:
   - name: "mock-a"
     type: "mock"
@@ -57,6 +64,10 @@ providers:
     enabled: true
     priority: 30
     timeout_s: 30.0
+    # Illustrative estimates (both models are :free tier): primary is cheaper,
+    # fallback is rated slightly higher quality — a real tradeoff for scoring.
+    cost_per_1k_tokens: 0.02
+    quality_weight: 0.7
     openrouter:
       model: "google/gemma-4-31b-it:free"
   - name: "openrouter-fallback"
@@ -64,5 +75,7 @@ providers:
     enabled: true
     priority: 31
     timeout_s: 30.0
+    cost_per_1k_tokens: 0.06
+    quality_weight: 0.85
     openrouter:
       model: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"

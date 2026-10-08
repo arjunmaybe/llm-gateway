@@ -58,7 +58,8 @@ from src.resilience.retry import RetryPolicy
 from src.router.circuit_breaker import CircuitState, ResilientCircuitBreaker
 from src.router.engine import RouteDecision, RouterEngine
 from src.router.health import HealthRegistry
-from src.telemetry.latency import StreamingTiming, Timer
+from src.router.scorer import ScoringWeights
+from src.telemetry.latency import LatencyTracker, StreamingTiming, Timer
 from src.telemetry.metrics import NoOpMetricsRecorder
 from src.telemetry.tracer import NoOpTracer
 
@@ -187,12 +188,21 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         recovery_timeout_s=resolved.resilience.circuit_breaker.recovery_timeout_s,
         half_open_max_inflight=resolved.resilience.circuit_breaker.half_open_max_inflight,
     )
+    latency_tracker = LatencyTracker()
     router = RouterEngine(
         priority=priority,
         default_provider=resolved.routing.default_provider,
         model_aliases=dict(resolved.routing.model_aliases),
         health=health_registry,
         breaker=breaker,
+        costs={p.name: p.cost_per_1k_tokens for p in enabled_ordered},
+        qualities={p.name: p.quality_weight for p in enabled_ordered},
+        latency_tracker=latency_tracker,
+        scoring_weights=ScoringWeights(
+            latency=resolved.scoring.weight_latency,
+            cost=resolved.scoring.weight_cost,
+            quality=resolved.scoring.weight_quality,
+        ),
     )
     proxy = ProxyClient(
         providers,
@@ -215,6 +225,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         ),
         metrics=metrics,
         tracer=tracer,
+        latency_tracker=latency_tracker,
     )
 
     @asynccontextmanager
@@ -237,6 +248,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.state.router = router
     app.state.proxy = proxy
     app.state.health = health_registry
+    app.state.latency_tracker = latency_tracker
     app.state.cache = cache
     app.state.metrics = metrics
     app.state.tracer = tracer

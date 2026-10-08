@@ -39,6 +39,8 @@ from src.resilience.retry import RetryPolicy
 from src.router.circuit_breaker import ResilientCircuitBreaker
 from src.router.engine import RouterEngine
 from src.router.health import HealthRegistry
+from src.router.scorer import ScoringWeights
+from src.telemetry.latency import LatencyTracker
 
 PRIMARY_NAME = "openrouter-primary"
 FALLBACK_NAME = "openrouter-fallback"
@@ -93,12 +95,22 @@ def build_stack(primary_model_override: str | None = None):
         recovery_timeout_s=settings.resilience.circuit_breaker.recovery_timeout_s,
         half_open_max_inflight=settings.resilience.circuit_breaker.half_open_max_inflight,
     )
+    enabled_ordered = settings.enabled_providers_in_priority_order()
+    latency_tracker = LatencyTracker()
     router = RouterEngine(
         priority=PRIORITY,
         default_provider=PRIMARY_NAME,
         model_aliases={},
         health=health,
         breaker=breaker,
+        costs={p.name: p.cost_per_1k_tokens for p in enabled_ordered},
+        qualities={p.name: p.quality_weight for p in enabled_ordered},
+        latency_tracker=latency_tracker,
+        scoring_weights=ScoringWeights(
+            latency=settings.scoring.weight_latency,
+            cost=settings.scoring.weight_cost,
+            quality=settings.scoring.weight_quality,
+        ),
     )
     proxy = ProxyClient(providers, timeouts, default_timeout_s=30.0)
     executor = ResilientExecutor(

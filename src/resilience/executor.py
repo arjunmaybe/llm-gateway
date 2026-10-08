@@ -31,6 +31,7 @@ from src.resilience.retry import BackoffSleeper, RetryPolicy, Sleeper
 from src.router.circuit_breaker import CircuitBreaker, CircuitState
 from src.router.engine import RouteDecision, RouterEngine
 from src.router.health import HealthRegistry
+from src.telemetry.latency import LatencyTracker
 
 AttemptOutcome = Literal["success", "failed", "skipped"]
 SkipReason = Literal["unhealthy", "circuit-open"]
@@ -115,6 +116,7 @@ class ResilientExecutor:
         sleeper: Sleeper | None = None,
         jitter: random.Random | None = None,
         clock: Callable[[], float] | None = None,
+        latency_tracker: LatencyTracker | None = None,
     ) -> None:
         self._router = router
         self._proxy = proxy
@@ -125,6 +127,7 @@ class ResilientExecutor:
         self._tracer = tracer
         self._backoff = BackoffSleeper(sleeper=sleeper, jitter=jitter)
         self._clock = clock if clock is not None else time.monotonic
+        self._latency_tracker = latency_tracker
 
     async def execute(self, request: NormalizedChatRequest) -> ExecuteResult:
         start = self._clock()
@@ -269,6 +272,8 @@ class ResilientExecutor:
             latency_ms = (self._clock() - begun) * 1000.0
             self._breaker.record_success(name)
             self._health.mark_healthy(name)
+            if self._latency_tracker is not None:
+                self._latency_tracker.record(name, latency_ms)
             self._metric("gateway_provider_attempts_total", provider=name, code="ok")
             self._metrics_latency(name, latency_ms)
             attempts.append(

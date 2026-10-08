@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections import deque
 from dataclasses import dataclass
 from types import TracebackType
 
@@ -55,3 +56,45 @@ class StreamingTiming:
 
     ttft_ms: float | None = None
     itl_ms: float | None = None
+
+
+class LatencyTracker:
+    """Minimal per-provider rolling latency average (last-N mean).
+
+    Keyed by provider name. ``ResilientExecutor`` records each *successful*
+    attempt's latency; only successes are recorded so a fast-failing provider
+    never looks attractive. ``RouterEngine`` reads ``average()`` for scoring;
+    providers with no samples return ``None`` and score neutrally on latency.
+    Synchronous with no awaits: safe on a single asyncio event loop.
+    """
+
+    def __init__(self, window: int = 20) -> None:
+        if window < 1:
+            raise ValueError("window must be >= 1")
+        self._window = window
+        self._samples: dict[str, deque[float]] = {}
+
+    @property
+    def window(self) -> int:
+        return self._window
+
+    def record(self, provider: str, latency_ms: float) -> None:
+        samples = self._samples.get(provider)
+        if samples is None:
+            samples = deque(maxlen=self._window)
+            self._samples[provider] = samples
+        samples.append(max(latency_ms, 0.0))
+
+    def average(self, provider: str) -> float | None:
+        """Mean of the last ``window`` successful samples, or ``None``."""
+        samples = self._samples.get(provider)
+        if not samples:
+            return None
+        return sum(samples) / len(samples)
+
+    def averages(self) -> dict[str, float]:
+        return {
+            name: sum(samples) / len(samples)
+            for name, samples in self._samples.items()
+            if samples
+        }
