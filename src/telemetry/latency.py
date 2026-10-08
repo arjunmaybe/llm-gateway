@@ -47,11 +47,16 @@ class Timer:
 
 @dataclass(frozen=True)
 class StreamingTiming:
-    """Reserved for M3 streaming.
+    """Measured streaming timing: time-to-first-byte and inter-chunk latency.
 
-    M1 rule: non-streaming responses MUST report ``ttft_ms=None`` and
-    ``itl_ms=None``. Fabricating streaming metrics is a bug, so M1 constructs
-    this with both fields ``None`` and never populates them.
+    Populated with real ``perf_counter_ns`` measurements on the M3 streaming
+    path (see ``src/main.py:_handle_streaming``): ``ttft_ms`` covers request
+    entry to first-chunk acquisition, ``itl_ms`` is the mean gap between
+    subsequent chunks. A single-chunk stream has no inter-chunk gap, so
+    ``itl_ms`` stays ``None`` rather than a fabricated ``0.0``.
+
+    Non-streaming responses MUST still report ``ttft_ms=None`` and
+    ``itl_ms=None``. Fabricating streaming metrics is a bug.
     """
 
     ttft_ms: float | None = None
